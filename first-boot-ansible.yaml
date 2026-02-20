@@ -1,13 +1,103 @@
 ---
-- name: Install cowsay on Ubuntu
+# first-boot-ansible.yaml
+
+- name: Manage ansible-on-boot service
   hosts: localhost
   connection: local
   become: true
+  vars:
+    ansible_on_boot_enabled: true
+    ansible_on_boot_repo_dir: /opt/ansible-setup
+    ansible_on_boot_playbook: first-boot-ansible.yaml
+    ansible_on_boot_timeout: 900
+    ansible_on_boot_network_wait: 120
 
   tasks:
-
-    - name: Install cowsay
+    - name: Update apt cache
       ansible.builtin.apt:
-        name: cowsay
-        state: present
         update_cache: true
+
+    - name: Create on-boot script
+      ansible.builtin.copy:
+        dest: /usr/local/bin/ansible-on-boot.sh
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          LOG=/var/log/ansible-on-boot.log
+          exec > "$LOG" 2>&1
+          echo "=== Ansible on-boot: $(date) ==="
+
+          # Wait for network connectivity
+          TRIES=0
+          LIMIT=$(( {{ ansible_on_boot_network_wait }} / 2 ))
+          while ! ping -c1 -W2 archive.ubuntu.com \
+            > /dev/null 2>&1; do
+            TRIES=$((TRIES + 1))
+            if [ "$TRIES" -ge "$LIMIT" ]; then
+              echo "ERROR: No network after {{ ansible_on_boot_network_wait }}s"
+              exit 1
+            fi
+            sleep 2
+          done
+
+          # Pull latest and run playbook
+          cd {{ ansible_on_boot_repo_dir }}
+          git pull
+          ansible-playbook \
+            {{ ansible_on_boot_playbook }}
+
+          echo "=== Ansible on-boot done: $(date) ==="
+      when: ansible_on_boot_enabled
+
+    - name: Create systemd service unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ansible-on-boot.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Run Ansible playbook on boot
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/ansible-on-boot.sh
+          RemainAfterExit=yes
+          TimeoutStartSec={{ ansible_on_boot_timeout }}
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Reload systemd
+      when: ansible_on_boot_enabled
+
+    - name: Enable the service
+      ansible.builtin.systemd:
+        name: ansible-on-boot.service
+        enabled: true
+        daemon_reload: true
+      when: ansible_on_boot_enabled
+
+    - name: Disable the service
+      ansible.builtin.systemd:
+        name: ansible-on-boot.service
+        enabled: false
+        state: stopped
+      when: not ansible_on_boot_enabled
+
+    - name: Remove script when disabled
+      ansible.builtin.file:
+        path: /usr/local/bin/ansible-on-boot.sh
+        state: absent
+      when: not ansible_on_boot_enabled
+
+    - name: Remove service unit when disabled
+      ansible.builtin.file:
+        path: /etc/systemd/system/ansible-on-boot.service
+        state: absent
+      notify: Reload systemd
+      when: not ansible_on_boot_enabled
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

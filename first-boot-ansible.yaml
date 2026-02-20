@@ -1,0 +1,13 @@
+---
+- name: Install cowsay on Ubuntu
+  hosts: localhost
+  connection: local
+  become: true
+
+  tasks:
+
+    - name: Install cowsay
+      ansible.builtin.apt:
+        name: cowsay
+        state: present
+        update_cache: true

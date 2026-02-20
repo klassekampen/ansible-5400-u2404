@@ -17,6 +17,11 @@
       ansible.builtin.apt:
         update_cache: true
 
+    - name: Install wallch
+      ansible.builtin.apt:
+        name: wallch
+        state: present    
+
     - name: Install cowsay
       ansible.builtin.apt:
         name: cowsay

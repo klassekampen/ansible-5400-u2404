@@ -17,6 +17,11 @@
       ansible.builtin.apt:
         update_cache: true
 
+    - name: Install cowsay
+      ansible.builtin.apt:
+        name: cowsay
+        state: present    
+
     - name: Create on-boot script
       ansible.builtin.copy:
         dest: /usr/local/bin/ansible-on-boot.sh
